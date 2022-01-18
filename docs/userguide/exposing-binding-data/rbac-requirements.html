@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Provisioned Service :: Service Binding Operator Documentation</title>
-    <link rel="canonical" href="https://redhat-developer.github.io/service-binding-operator/userguide/exposing-binding-data/provisioned-service.html">
+    <title>RBAC Requirements :: Service Binding Operator Documentation</title>
+    <link rel="canonical" href="https://redhat-developer.github.io/service-binding-operator/userguide/exposing-binding-data/rbac-requirements.html">
     <meta name="generator" content="Antora 2.3.4">
     <link rel="stylesheet" href="../../_/css/site.css">
     <script>var uiRootPath = '../../_'</script>
@@ -108,7 +108,7 @@
   <li class="nav-item" data-depth="2">
     <a class="nav-link" href="intro-expose-binding.html">Introduction</a>
   </li>
-  <li class="nav-item is-current-page" data-depth="2">
+  <li class="nav-item" data-depth="2">
     <a class="nav-link" href="provisioned-service.html">Provisioned Service</a>
   </li>
   <li class="nav-item" data-depth="2">
@@ -123,7 +123,7 @@
   <li class="nav-item" data-depth="2">
     <a class="nav-link" href="detect-bindings.html">Detect Bindings through owned resources</a>
   </li>
-  <li class="nav-item" data-depth="2">
+  <li class="nav-item is-current-page" data-depth="2">
     <a class="nav-link" href="rbac-requirements.html">RBAC Requirements</a>
   </li>
 </ul>
@@ -168,112 +168,47 @@
   <ul>
     <li><a href="../intro.html">User Guide</a></li>
     <li>Expose Binding Data</li>
-    <li><a href="provisioned-service.html">Provisioned Service</a></li>
+    <li><a href="rbac-requirements.html">RBAC Requirements</a></li>
   </ul>
 </nav>
-  <div class="edit-this-page"><a href="https://github.com/sadlerap/service-binding-operator/edit/master/docs/userguide/modules/exposing-binding-data/pages/provisioned-service.adoc">Edit this Page</a></div>
+  <div class="edit-this-page"><a href="https://github.com/sadlerap/service-binding-operator/edit/master/docs/userguide/modules/exposing-binding-data/pages/rbac-requirements.adoc">Edit this Page</a></div>
   </div>
   <div class="content">
 <aside class="toc sidebar" data-title="Contents" data-levels="2">
   <div class="toc-menu"></div>
 </aside>
 <article class="doc">
-<h1 class="page">Provisioned Service</h1>
+<h1 class="page">RBAC Requirements</h1>
 <div class="paragraph">
-<p>As a backing service author or provider, you can use this method to be
-compliant with the Service Binding specification.</p>
+<p>Service Binding Operator performs requests against Kubernetes API using a dedicated service account. By default the account has permissions to bind services to applications, both represented by standard Kubernetes Deployments, DaemonSets, ReplicaSets, StatefulSets and <a href="https://docs.openshift.com/container-platform/latest/applications/deployments/what-deployments-are.html#deployments-and-deploymentconfigs_what-deployments-are">OpenShift DeploymentConfigs</a></p>
 </div>
 <div class="paragraph">
-<p><a href="https://github.com/k8s-service-bindings/spec#provisioned-service">Provisioned
-Service</a> represents a backing service custom resource with a reference
-to a Secret resource. The Secret resource provides all the binding data
-values required for an application to connect to the backing service.
-You must provide the reference to the Secret service resource in the
-<code>.status.binding.name</code> attribute of the custom resource.</p>
-</div>
-<div class="paragraph">
-<p>The following examples show an <code>AccountService</code> resource that represents
-a backing service and a <code>Secret</code> service resource. As a backing service
-author, you can create a <code>Secret</code> service resource with all the
-necessary connection details and refer them using the
-<code>.status.binding.name</code> field.</p>
+<p>Based on <a href="https://github.com/servicebinding/spec#considerations-for-role-based-access-control-rbac">the spec recommendation</a>, the operator service account is bound to
+<a href="https://kubernetes.io/docs/reference/access-authn-authz/rbac/#aggregated-clusterroles">an aggregated cluster role</a>, allowing operator vendors and/or cluster admins to enable binding custom service resources. The needed permissions need be encapsulated within a <code>ClusterRole</code> labelled with <code>servicebinding.io/controller: "true"</code>.</p>
 </div>
 <div class="listingblock">
-<div class="title">Example: AccountService resource</div>
+<div class="title">Example: Enable binding to MongoDB instances provisioned by <a href="https://operatorhub.io/operator/percona-server-mongodb-operator">Percona MongoDB operator</a>:</div>
 <div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: example.com/v1alpha1
-kind: AccountService
-name: prod-account-service
-spec:
-  ...
-status:
-  binding:
-    name: production-db-secret</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>This is the referenced Secret:</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: v1
-kind: Secret
+<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
 metadata:
-  name: production-db-secret
-data:
-  password: "MTBz"
-  username: "Z3Vlc3Q="</code></pre>
+  name: percona-mongodb-view
+  labels:
+    servicebinding.io/controller: "true"
+rules:
+  - apiGroups:
+      - psmdb.percona.com
+    resources:
+      - perconaservermongodbs
+      - perconaservermongodbs/status
+    verbs:
+      - get
+      - list</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>When creating service binding, directly give the details of the
-<code>AccountService</code> resource in the following <code>ServiceBinding</code>
-specifications:</p>
-</div>
-<div class="listingblock">
-<div class="title">Example: Specification with the binding.operators.coreos.com API</div>
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: binding.operators.coreos.com/v1alpha1
-kind: ServiceBinding
-metadata:
-  name: account-service
-spec:
-  ...
-  services:
-  - group: "example.com"
-    version: v1alpha1
-    kind: AccountService
-    name: prod-account-service
-  application:
-    name: nodejs-app
-    group: apps
-    version: v1
-    resource: deployments</code></pre>
-</div>
-</div>
-<div class="listingblock">
-<div class="title">Example: Specification that is compliant with the service.binding API</div>
-<div class="content">
-<pre class="highlightjs highlight"><code class="language-yaml hljs" data-lang="yaml">apiVersion: servicebinding.io/v1alpha3
-kind: ServiceBinding
-metadata:
-  name: account-service
-
-spec:
-  ...
-  service:
-    apiVersion: example.com/v1alpha1
-    kind: AccountService
-    name: prod-account-service
-  application:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: nodejs-app</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>All the keys in the <code>Secret</code> resource are exposed as binding data and
-projected into the application.</p>
+<p>This cluster role can be deployed during the installation of the backing service
+operator.  You can add it as part of the manifests.</p>
 </div>
 </article>
   </div>
