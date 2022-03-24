@@ -100,6 +100,20 @@ spec:
                                       type: string
                                     name:
                                       type: string
+                        volumes:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                              secret:
+                                type: object
+                                properties:
+                                  defaultMode:
+                                    type: integer
+                                  secretName:
+                                    type: string
   scope: Namespaced
   names:
     plural: appconfigs
