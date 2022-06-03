@@ -1,9 +1,10 @@
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.8.0
+    controller-gen.kubebuilder.io/version: v0.7.0
   creationTimestamp: null
   name: clusterworkloadresourcemappings.servicebinding.io
 spec:
@@ -50,7 +51,7 @@ spec:
                     PodTemplateSpec-like structure.
                   properties:
                     annotations:
-                      description: Annotations is a Restricted JSONPath that references
+                      description: Annotations is a Fixed JSONPath that references
                         the annotations map within the workload resource. These annotations
                         must end up in the resulting Pod, and are generally not the
                         workload resource's annotations. Defaults to `.spec.template.metadata.annotations`.
@@ -69,14 +70,14 @@ spec:
                           to find those structures."
                         properties:
                           env:
-                            description: Env is a Restricted JSONPath that references
-                              the slice of environment variables for the container
-                              with the container-like workload resource fragment.
-                              The referenced location is created if it does not exist.
-                              Defaults to `.envs`.
+                            description: Env is a Fixed JSONPath that references the
+                              slice of environment variables for the container with
+                              the container-like workload resource fragment. The referenced
+                              location is created if it does not exist. Defaults to
+                              `.envs`.
                             type: string
                           name:
-                            description: Name is a Restricted JSONPath that references
+                            description: Name is a Fixed JSONPath that references
                               the name of the container with the container-like workload
                               resource fragment. If not defined, container name filtering
                               is ignored.
@@ -86,11 +87,11 @@ spec:
                               resource that matches an existing fragment that is container-like.
                             type: string
                           volumeMounts:
-                            description: VolumeMounts is a Restricted JSONPath that
-                              references the slice of volume mounts for the container
-                              with the container-like workload resource fragment.
-                              The referenced location is created if it does not exist.
-                              Defaults to `.volumeMounts`.
+                            description: VolumeMounts is a Fixed JSONPath that references
+                              the slice of volume mounts for the container with the
+                              container-like workload resource fragment. The referenced
+                              location is created if it does not exist. Defaults to
+                              `.volumeMounts`.
                             type: string
                         required:
                         - path
@@ -101,9 +102,9 @@ spec:
                         that this mapping is for.
                       type: string
                     volumes:
-                      description: Volumes is a Restricted JSONPath that references
-                        the slice of volumes within the workload resource. Defaults
-                        to `.spec.template.spec.volumes`.
+                      description: Volumes is a Fixed JSONPath that references the
+                        slice of volumes within the workload resource. Defaults to
+                        `.spec.template.spec.volumes`.
                       type: string
                   required:
                   - version
