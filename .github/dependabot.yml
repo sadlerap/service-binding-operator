@@ -1,0 +1,13 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    # look at our go.mod under the root of the repository
+    directory: "/"
+    # check daily
+    schedule:
+      interval: daily
+
+  - package-ecosystem: pip
+    directory: "test/acceptance/features/"
+    schedule:
+      interval: daily
