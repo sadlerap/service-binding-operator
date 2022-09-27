@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var _ pipeline.Service = &service{}
@@ -264,6 +265,7 @@ func (c *customResourceDefinition) IsBindable() (bool, error) {
 }
 
 func (c *customResourceDefinition) Descriptor() (*pipeline.CRDDescription, error) {
+	log := ctrl.Log.WithName("service")
 	csvs, err := c.client.Resource(olmv1alpha1.SchemeGroupVersion.WithResource("clusterserviceversions")).Namespace(c.ns).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -274,6 +276,7 @@ func (c *customResourceDefinition) Descriptor() (*pipeline.CRDDescription, error
 	if len(csvs.Items) == 0 {
 		return nil, nil
 	}
+	log.Info("Found CSVs", "num", len(csvs.Items), "namespace", c.ns)
 	for _, csv := range csvs.Items {
 		ownedPath := []string{"spec", "customresourcedefinitions", "owned"}
 
