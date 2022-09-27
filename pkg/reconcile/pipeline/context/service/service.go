@@ -266,13 +266,20 @@ func (c *customResourceDefinition) IsBindable() (bool, error) {
 
 func (c *customResourceDefinition) Descriptor() (*pipeline.CRDDescription, error) {
 	log := ctrl.Log.WithName("service")
-	csvs, err := c.client.Resource(olmv1alpha1.SchemeGroupVersion.WithResource("clusterserviceversions")).Namespace(c.ns).List(context.Background(), metav1.ListOptions{})
+	var namespace string
+	if c.ns == "" {
+		namespace = "default"
+	} else {
+		namespace = c.ns
+	}
+	csvs, err := c.client.Resource(olmv1alpha1.SchemeGroupVersion.WithResource("clusterserviceversions")).Namespace(namespace).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	log.Info("Found CSVs", "num", len(csvs.Items), "namespace", c.ns)
 	if len(csvs.Items) == 0 {
 		return nil, nil
 	}
