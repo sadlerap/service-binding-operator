@@ -9,6 +9,9 @@ on:
 env:
   GO111MODULE: on
   SDK_VERSION: "1.17.0"
+  ARTIFACTS: "artifacts"
+  REGISTRY_PREFIX: quay.io/ansadler
+  REPO: servicebinding-operator
   MINIKUBE_WANTUPDATENOTIFICATION: false
   MINIKUBE_WANTREPORTERRORPROMPT: false
   K8S_VERSION: "1.19.2"
@@ -64,10 +67,103 @@ jobs:
           verbose: true
           fail_ci_if_error: true
 
+  build-operator-images:
+    name: "Build operator images (PR)"
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "^1.18"
+
+      - name: Checkout Git Repository
+        uses: actions/checkout@v3
+
+      - name: Setup CLI
+        uses: ./.github/actions/setup-cli
+        with:
+          operator-sdk: true
+
+      - name: Setup local registry
+        run: |
+          .github/actions/setup-podman/setup-local-registry.sh
+          .github/actions/setup-podman/setup-podman-wrapper.sh
+
+      - name: Build images
+        env:
+          PR_NUMBER: ${{github.event.pull_request.number}}
+          PR_SHA: ${{github.event.pull_request.head.sha}}
+          OPERATOR_REPO_REF: ${{env.REGISTRY_PREFIX}}/${{env.REPO}}
+        run: |
+          export TAG=pr-${PR_NUMBER}-${PR_SHA:0:8}
+          export OPERATOR_IMAGE_REF=${OPERATOR_REPO_REF}:${TAG}
+          export OPERATOR_BUNDLE_IMAGE_REF=${OPERATOR_IMAGE_REF}-bundle
+          export OPERATOR_INDEX_IMAGE_REF=$(make operator-index-image-ref)
+          export OPERATOR_UPGRADE_INDEX_IMAGE_REF=${OPERATOR_IMAGE_REF}-index
+          export OPERATOR_BUNDLE_VERSION=$(make operator-version)-${TAG}
+
+          which podman
+
+          make opm
+
+          podman pull ${OPERATOR_INDEX_IMAGE_REF}
+
+          OPM=.github/actions/setup-podman/opm BUILDAH_FORMAT=docker make SKIP_REGISTRY_LOGIN=true push-index-image-upgrade -o registry-login
+
+          mkdir -p ${ARTIFACTS}
+
+          echo "export OPERATOR_IMAGE_REF=${OPERATOR_IMAGE_REF}" >> ${ARTIFACTS}/operator.refs
+          echo "export OPERATOR_BUNDLE_IMAGE_REF=${OPERATOR_BUNDLE_IMAGE_REF}" >> ${ARTIFACTS}/operator.refs
+          echo "export OPERATOR_INDEX_IMAGE_REF=${OPERATOR_UPGRADE_INDEX_IMAGE_REF}" >> ${ARTIFACTS}/operator.refs
+
+          podman stop reg
+          tar -czvf ${ARTIFACTS}/registry.tar.gz -C ${GITHUB_WORKSPACE} registry
+
+      - name: Archive images
+        uses: actions/upload-artifact@v3
+        with:
+          name: operator-images-${{github.event.pull_request.number}}-${{github.event.pull_request.head.sha}}
+          path: ${{env.ARTIFACTS}}/*.tar.gz
+
+      - name: Archive image references
+        uses: actions/upload-artifact@v3
+        with:
+          name: operator-refs-${{github.event.pull_request.number}}-${{github.event.pull_request.head.sha}}
+          path: ${{env.ARTIFACTS}}/*.refs
+
+  push-operator-images:
+    name: "Push operator images (PR)"
+    runs-on: ubuntu-20.04
+    needs: build-operator-images
+
+    steps:
+      - name: Checkout Git Repository
+        uses: actions/checkout@v3
+
+      - name: Download images
+        uses: pmacik/action-download-multiple-artifacts@node16
+        with:
+          names: operator-images-${{github.event.pull_request.number}}-${{github.event.pull_request.head.sha}}
+
+      - name: Setup local registry
+        run: |
+          tar -xvf registry.tar.gz
+          .github/actions/setup-podman/setup-local-registry.sh
+
+      - name: Push operator, bundle and index images
+        run: |
+          set -x
+          for tag in $(skopeo list-tags --tls-verify=false docker://localhost:5000/${REPO} | jq -r '.Tags[] | select(startswith("pr-${{github.event.pull_request.number}}-"))'); do
+            sha=$(skopeo inspect --tls-verify=false docker://localhost:5000/${REPO}:${tag} | jq -r '.Digest')
+            skopeo copy --dest-creds ${{secrets.QUAY_USERNAME}}:${{secrets.QUAY_TOKEN}} --all --src-tls-verify=false docker://localhost:5000/${REPO}@${sha} docker://${REGISTRY_PREFIX}/${REPO}:${tag}
+          done
+
   acceptance:
     name: Acceptance Tests with Kubernetes and using OLM
     runs-on: ubuntu-20.04
     timeout-minutes: 90
+    needs: push-operator-images
 
     env:
       EXTRA_BEHAVE_ARGS: "--tags=~@knative --tags=~@openshift --tags=~@examples --tags=~@supported-operator --tags=~@optional-annotations --tags=~@workload-resource-mapping --tags=~@upgrade-with-olm --tags=~@disable-github-actions"
@@ -93,15 +189,6 @@ jobs:
         uses: ./.github/actions/setup-cli
         with:
           start-minikube: true
-
-      - name: Wait for push
-        if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
-        uses: lewagon/wait-on-check-action@1b1630e169116b58a4b933d5ad7effc46d3d312d
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          check-name: "Push operator images (PR)"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 60
 
       - name: Extract image references
         if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
@@ -148,6 +235,7 @@ jobs:
   acceptance-optional-annotations:
     name: Optional Annotations Acceptance Tests with Kubernetes and using OLM
     runs-on: ubuntu-20.04
+    needs: push-operator-images
 
     env:
       EXTRA_BEHAVE_ARGS: "--tags=@optional-annotations --tags=~@disable-github-actions"
@@ -173,15 +261,6 @@ jobs:
         uses: ./.github/actions/setup-cli
         with:
           start-minikube: true
-
-      - name: Wait for push
-        if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
-        uses: lewagon/wait-on-check-action@1b1630e169116b58a4b933d5ad7effc46d3d312d
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          check-name: "Push operator images (PR)"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 60
 
       - name: Extract image references
         if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
@@ -228,6 +307,7 @@ jobs:
   acceptance-supported-operators:
     name: Supported Operators Acceptance Tests with Kubernetes and using OLM
     runs-on: ubuntu-20.04
+    needs: push-operator-images
 
     env:
       EXTRA_BEHAVE_ARGS: "--tags=@supported-operator --tags=~@disable-github-actions"
@@ -254,15 +334,6 @@ jobs:
         uses: ./.github/actions/setup-cli
         with:
           start-minikube: true
-
-      - name: Wait for push
-        if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
-        uses: lewagon/wait-on-check-action@1b1630e169116b58a4b933d5ad7effc46d3d312d
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          check-name: "Push operator images (PR)"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 60
 
       - name: Extract image references
         if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
@@ -309,6 +380,7 @@ jobs:
   acceptance-workload-resource-mapping:
     name: Workload Resource Mapping Acceptance Tests with Kubernetes and using OLM
     runs-on: ubuntu-20.04
+    needs: push-operator-images
 
     env:
       EXTRA_BEHAVE_ARGS: "--tags=@workload-resource-mapping --tags=~@disable-github-actions"
@@ -334,15 +406,6 @@ jobs:
         uses: ./.github/actions/setup-cli
         with:
           start-minikube: true
-
-      - name: Wait for push
-        if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
-        uses: lewagon/wait-on-check-action@1b1630e169116b58a4b933d5ad7effc46d3d312d
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          check-name: "Push operator images (PR)"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 60
 
       - name: Extract image references
         if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
@@ -389,6 +452,7 @@ jobs:
   acceptance-upgrade-with-olm:
     name: Acceptance Tests for upgrading SBO with OLM on Kubernetes
     runs-on: ubuntu-20.04
+    needs: push-operator-images
 
     env:
       EXTRA_BEHAVE_ARGS: "--tags=@upgrade-with-olm --tags=~@disable-github-actions"
@@ -420,15 +484,6 @@ jobs:
         timeout-minutes: 10
         run: |
           kubectl get crd clusterserviceversions.operators.coreos.com || curl -sL https://github.com/operator-framework/operator-lifecycle-manager/releases/download/v${OLM_VERSION}/install.sh | bash -s v${OLM_VERSION}
-
-      - name: Wait for push
-        if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
-        uses: lewagon/wait-on-check-action@1b1630e169116b58a4b933d5ad7effc46d3d312d
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          check-name: "Push operator images (PR)"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 60
 
       - name: Extract image references
         if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
@@ -479,6 +534,7 @@ jobs:
     name: Acceptance tests running on Kubernetes without using OLM
     runs-on: ubuntu-20.04
     timeout-minutes: 90
+    needs: push-operator-images
 
     env:
       EXTRA_BEHAVE_ARGS: "--tags=~@knative --tags=~@openshift --tags=~@olm --tags=~@disable-github-actions"
@@ -518,15 +574,6 @@ jobs:
           curl -Lo umoci https://github.com/opencontainers/umoci/releases/download/v${UMOCI_VERSION}/umoci.amd64
           chmod +x umoci
           mv -v umoci $GITHUB_WORKSPACE/bin/
-
-      - name: Wait for push
-        if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
-        uses: lewagon/wait-on-check-action@1b1630e169116b58a4b933d5ad7effc46d3d312d
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          check-name: "Push operator images (PR)"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 60
 
       - name: Extract image references
         if: ${{ steps.check-skip-acceptance.outputs.can_skip != 'true' }}
